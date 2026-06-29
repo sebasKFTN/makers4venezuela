@@ -194,6 +194,8 @@ footer a{color:var(--orange-dark);font-weight:700;text-decoration:none}
 
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.7.0/mapbox-gl.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="supabase-client.js"></script>
 <script src="models-data.js"></script>
@@ -494,7 +496,7 @@ function viewDashboard(){
       ${[["all","Todo"],["today","Hoy"],["week","Semana"],["month","Mes"]].map(([k,l])=>
         `<button class="fbtn ${k==="all"?"on":""}" data-f="${k}">${l}</button>`).join("")}
       <button class="fbtn" id="dash-refresh" style="margin-left:auto">↻ Actualizar</button>
-      <button class="fbtn" id="dash-download">⬇ Reporte CSV</button>
+      <button class="fbtn" id="dash-download">⬇ Reporte PDF</button>
     </div>
     <div class="selrow" style="flex-wrap:wrap">
       <span class="muted" style="font-size:13px">🌎 País</span>
@@ -526,26 +528,58 @@ async function loadDash(){
     msel.innerHTML='<option value="">Todos</option>'+ms.map(m=>`<option ${m===_fModel?"selected":""}>${esc(m)}</option>`).join(""); }
   renderDash();
 }
-/* CSV helpers — used by every view */
-function csvCell(v){ v=String(v==null?"":v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
-function csvDownload(rows, name){
+/* ---- PDF report (branded), used by every view ---- */
+function pdfReport(rows, scope, fileName){
   if(!rows||!rows.length){ toast("No hay datos para exportar."); return; }
-  const hdr=["Fecha","Empresa","Tipo","Fabricadas","Entregadas","Pais"];
-  const lines=[hdr.join(",")].concat(rows.map(r=>
-    [r.fecha,r.empresa,r.tipo,r.fab,r.ent,r.pais].map(csvCell).join(",")));
-  const blob=new Blob(["﻿"+lines.join("\n")],{type:"text/csv;charset=utf-8"});
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-  a.download=(name||"makers-venezuela.csv").replace(/\s+/g,"-");
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
-  toast(`⬇ ${rows.length} registros exportados`);
+  if(!(window.jspdf&&window.jspdf.jsPDF)){ toast("No se pudo cargar el generador PDF."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:"pt",format:"a4"});
+  const W = doc.internal.pageSize.getWidth();
+  // aggregates
+  let fab=0,ent=0; const models=new Set(),orgs=new Set(),countries=new Set();
+  rows.forEach(r=>{ fab+=r.fab; ent+=r.ent; if(r.tipo)models.add(r.tipo); if(r.empresa)orgs.add(r.empresa); if(r.pais)countries.add(r.pais); });
+  // header bar
+  doc.setFillColor(226,88,14); doc.rect(0,0,W,64,"F");
+  doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(16);
+  doc.text("Makers · Venezuela", 40, 30);
+  doc.setFont("helvetica","normal"); doc.setFontSize(10);
+  doc.text("Registro de producción 3D para la donación médica", 40, 46);
+  // meta
+  doc.setTextColor(21,20,15); doc.setFontSize(10);
+  const today=new Date().toLocaleString("es");
+  doc.text(`Reporte: ${scope}`, 40, 88);
+  doc.text(`Generado: ${today}`, 40, 102);
+  doc.setFont("helvetica","bold"); doc.setFontSize(11);
+  doc.text(`Fabricadas: ${fab}   Entregadas: ${ent}   Modelos: ${models.size}   Talleres: ${orgs.size}   Países: ${countries.size}`, 40, 124);
+  // table
+  doc.autoTable({
+    startY: 140,
+    head: [["Fecha","Taller","Modelo","Fab.","Ent.","País"]],
+    body: rows.map(r=>[r.fecha||"", r.empresa||"", (r.tipo||"").replace(/^NUEVO:\s*/i,"★ "), r.fab, r.ent, r.pais||""]),
+    styles:{font:"helvetica",fontSize:8,cellPadding:3,textColor:[21,20,15]},
+    headStyles:{fillColor:[21,20,15],textColor:[255,255,255]},
+    alternateRowStyles:{fillColor:[247,243,236]},
+    columnStyles:{3:{halign:"right"},4:{halign:"right"}},
+    margin:{left:40,right:40},
+    didDrawPage:()=>{
+      const h=doc.internal.pageSize.getHeight();
+      doc.setFontSize(8); doc.setTextColor(124,118,101);
+      doc.text("Creado por KAFETIN · con la tecnología de Fab City — ttw.fab.city/venezuela", 40, h-20);
+    }
+  });
+  doc.save((fileName||"makers-venezuela.pdf").replace(/\s+/g,"-"));
+  toast(`⬇ Reporte PDF (${rows.length} registros)`);
 }
 /* dashboard: export the current filtered selection */
-function downloadReport(){ csvDownload(_filtered, `makers-venezuela_${_fFilter}_${(_fPais||"todos")}_${(_fModel||"todos")}.csv`); }
+function downloadReport(){
+  const scope=`${_fFilter==="all"?"Todo":_fFilter} · ${_fPais||"Todos los países"} · ${_fModel||"Todos los modelos"}`;
+  pdfReport(_filtered, scope, `makers-venezuela_${_fFilter}_${(_fPais||"todos")}_${(_fModel||"todos")}.pdf`);
+}
 /* registro / ingesta: export the whole registry */
 async function downloadAll(){
   toast("Preparando reporte…");
   const rows = (_rows && _rows.length) ? _rows : await M4V.getRows();
-  csvDownload(rows, "makers-venezuela_completo.csv");
+  pdfReport(rows, "Completo (toda la red)", "makers-venezuela_completo.pdf");
 }
 /* country points for either map renderer */
 function countryPoints(byCountry){
@@ -565,35 +599,57 @@ function mapSection(byCountry){
   }
   return buildCountryMap(byCountry);
 }
-let _map=null;
+/* Spanish country name -> ISO 3166-1 alpha-2 (matches Mapbox boundaries) */
+const ISO2={"Colombia":"CO","Venezuela":"VE","Estados Unidos":"US","Panamá":"PA","Argentina":"AR",
+  "México":"MX","Uruguay":"UY","España":"ES","El Salvador":"SV","Chile":"CL","Bolivia":"BO",
+  "Ecuador":"EC","Perú":"PE","Costa Rica":"CR","Cuba":"CU","Guatemala":"GT","Honduras":"HN",
+  "Nicaragua":"NI","Paraguay":"PY","República Dominicana":"DO"};
+function orangeScale(t){ // t 0..1 -> light to deep orange
+  const a=[250,224,200], b=[166,60,8];
+  const c=a.map((v,i)=>Math.round(v+(b[i]-v)*t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+let _map=null, _lastByCountry={};
 function initMapbox(pts){
   const el=document.getElementById("mapbox-map"); if(!el||!window.mapboxgl) return;
-  try{ mapboxgl.accessToken=MAPBOX_TOKEN;
-    const maxFab=Math.max(...pts.map(p=>p.fab));
-    const fc={type:"FeatureCollection",features:pts.map(p=>({type:"Feature",
-      properties:{c:p.c,fab:p.fab,r:9+Math.sqrt(p.fab/maxFab)*36},
-      geometry:{type:"Point",coordinates:[p.lon,p.lat]}}))};
-    const map=new mapboxgl.Map({container:el,style:"mapbox://styles/mapbox/light-v11",center:[-74,4],zoom:1.4});
+  try{
+    mapboxgl.accessToken=MAPBOX_TOKEN;
+    const maxFab=Math.max(1,...pts.map(p=>p.fab));
+    // data-driven fill color per country ISO
+    const match=["match",["get","iso_3166_1"]];
+    pts.forEach(p=>{ const iso=ISO2[p.c]; if(iso){ const t=Math.pow(p.fab/maxFab,0.45); match.push(iso, orangeScale(t)); }});
+    match.push("rgba(0,0,0,0)");
+    const map=new mapboxgl.Map({container:el,style:"mapbox://styles/mapbox/light-v11",
+      center:[-55,8],zoom:1.3,attributionControl:false});
     map.addControl(new mapboxgl.NavigationControl({showCompass:false}),"top-right");
     map.on("load",()=>{
-      map.addSource("pais",{type:"geojson",data:fc});
-      map.addLayer({id:"bub",type:"circle",source:"pais",paint:{
-        "circle-radius":["get","r"],"circle-color":"#E2580E","circle-opacity":0.55,
-        "circle-stroke-color":"#E2580E","circle-stroke-width":1.2}});
-      map.addLayer({id:"lbl",type:"symbol",source:"pais",
-        layout:{"text-field":["concat",["get","c"],"\n",["to-string",["get","fab"]]],
-          "text-size":11,"text-font":["DIN Pro Medium","Arial Unicode MS Regular"]},
-        paint:{"text-color":"#15140F","text-halo-color":"#FBF7EC","text-halo-width":1.2}});
+      map.addSource("countries",{type:"vector",url:"mapbox://mapbox.country-boundaries-v1"});
+      map.addLayer({id:"cfill",type:"fill",source:"countries","source-layer":"country_boundaries",
+        paint:{"fill-color":match,"fill-opacity":0.9}});
+      map.addLayer({id:"cline",type:"line",source:"countries","source-layer":"country_boundaries",
+        paint:{"line-color":"#E6DEC8","line-width":0.4}});
+      const fabByIso={}; pts.forEach(p=>{ if(ISO2[p.c]) fabByIso[ISO2[p.c]]={c:p.c,fab:p.fab,ent:p.ent}; });
+      const pop=new mapboxgl.Popup({closeButton:false,closeOnClick:false});
+      map.on("mousemove","cfill",e=>{ const iso=e.features[0].properties.iso_3166_1; const d=fabByIso[iso];
+        if(d){ map.getCanvas().style.cursor="pointer";
+          pop.setLngLat(e.lngLat).setHTML(`<b style="font-family:var(--font)">${d.c}</b><br>${d.fab} fab · ${d.ent} ent`).addTo(map);
+        } else { pop.remove(); map.getCanvas().style.cursor=""; } });
+      map.on("mouseleave","cfill",()=>{ pop.remove(); map.getCanvas().style.cursor=""; });
+      map.on("click","cfill",e=>{ const iso=e.features[0].properties.iso_3166_1;
+        if(fabByIso[iso]) setPaisFromMap(fabByIso[iso].c); });
       const b=new mapboxgl.LngLatBounds(); pts.forEach(p=>b.extend([p.lon,p.lat]));
-      map.fitBounds(b,{padding:60,maxZoom:5,duration:0});
-      map.on("click","bub",e=>setPaisFromMap(e.features[0].properties.c));
-      map.on("mouseenter","bub",()=>map.getCanvas().style.cursor="pointer");
-      map.on("mouseleave","bub",()=>map.getCanvas().style.cursor="");
+      if(pts.length) map.fitBounds(b,{padding:70,maxZoom:5,duration:0});
     });
+    // legend
+    const lg=document.createElement("div");
+    lg.style.cssText="position:absolute;left:10px;bottom:10px;background:var(--paper);border:1.5px solid var(--line);border-radius:8px;padding:7px 10px;font-size:10px;font-weight:700;color:var(--ink);z-index:2";
+    lg.innerHTML=`<div style="margin-bottom:4px">Unidades fabricadas</div>
+      <div style="height:8px;width:140px;border-radius:4px;background:linear-gradient(90deg,${orangeScale(0.05)},${orangeScale(1)})"></div>
+      <div style="display:flex;justify-content:space-between;color:var(--muted);margin-top:2px"><span>menos</span><span>${maxFab}</span></div>`;
+    el.style.position="relative"; el.appendChild(lg);
     _map=map;
   }catch(e){ console.warn("mapbox:",e.message); el.outerHTML=buildCountryMap(_lastByCountry||{}); }
 }
-let _lastByCountry={};
 /* proportional-symbol map of fabricated units per country (SVG fallback) */
 function buildCountryMap(byCountry){
   const pts=Object.entries(byCountry).map(([c,v])=>{
@@ -691,7 +747,12 @@ function render(route){
   if(route==="ingesta") return viewIngesta();
   return viewHome();
 }
-render(currentRoute());
+// Restore a deep-link route preserved by 404.html (GitHub Pages SPA fallback)
+(function(){
+  let r;
+  try{ r = sessionStorage.getItem("m4vRoute"); sessionStorage.removeItem("m4vRoute"); }catch(e){}
+  if(r!=null && r!=="") go(r); else render(currentRoute());
+})();
 </script>
 </body>
 </html>
