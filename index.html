@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#E2580E">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="description" content="Registro abierto de producción 3D para la donación médica en Venezuela. Un proyecto de Fab City · Things That Work.">
+<meta name="description" content="Registro abierto de producción 3D para la donación médica en Venezuela. Creado por KAFETIN, con la tecnología de Fab City · Things That Work.">
 <meta property="og:title" content="Makers · Venezuela — Registro de producción">
 <meta property="og:description" content="Cuántas férulas se están imprimiendo y entregando. Registra lo que haces, mira el panel, aporta tu historial.">
 <meta property="og:url" content="https://ttw.fab.city/venezuela">
@@ -163,8 +163,14 @@ footer a{color:var(--orange-dark);font-weight:700;text-decoration:none}
 <main id="app" class="wrap"></main>
 
 <footer><div class="wrap">
-  <span>Un proyecto de <strong>Fab City</strong> · Things That Work</span>
-  <span><a href="https://ttw.fab.city/venezuela" target="_blank" rel="noopener">ttw.fab.city/venezuela</a></span>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;width:100%">
+    <span>Creado por <a href="https://www.kafetin.co" target="_blank" rel="noopener"><strong>KAFETIN</strong></a> · con la tecnología de <strong>Fab City</strong></span>
+    <span><a href="https://ttw.fab.city/venezuela" target="_blank" rel="noopener">ttw.fab.city/venezuela</a></span>
+  </div>
+  <p style="width:100%;margin-top:10px;font-size:11px;line-height:1.5;color:var(--muted)">
+    Fab City es una organización sin ánimo de lucro con sede en Estonia. La gestión
+    de datos de este registro sigue los estándares de la Unión Europea (RGPD/GDPR).
+  </p>
 </div></footer>
 
 <div class="toast" id="toast"></div>
@@ -181,6 +187,15 @@ const SECTIONS = ["registro","dashboard","ingesta"];
 const PAISES = ["Venezuela","Colombia","Argentina","Bolivia","Chile","Costa Rica","Cuba","Ecuador","El Salvador","España","Estados Unidos","Guatemala","Honduras","México","Nicaragua","Panamá","Paraguay","Perú","República Dominicana","Uruguay","Otro"];
 const C = window.CATALOG || {IDS:[],NAMES:[],SUBS:[],ALTAS:[],IMGS:{}};
 const app = document.getElementById("app");
+
+/* country centroids [lon,lat] for the map view */
+const CENTROIDS = {
+  "Argentina":[-64,-34],"Bolivia":[-64,-17],"Chile":[-71,-35],"Colombia":[-74,4],
+  "Costa Rica":[-84,10],"Cuba":[-79,21.5],"Ecuador":[-78,-1.5],"El Salvador":[-89,13.7],
+  "España":[-3.7,40],"Estados Unidos":[-98,39],"Guatemala":[-90.5,15.5],"Honduras":[-86.5,15],
+  "México":[-102,23],"Nicaragua":[-85,12.8],"Panamá":[-80,8.5],"Paraguay":[-58,-23],
+  "Perú":[-75,-9.5],"República Dominicana":[-70.7,19],"Uruguay":[-56,-33],"Venezuela":[-66,7]
+};
 
 /* ---- base-path-agnostic router (works on GH Pages subpaths) ---- */
 let BASE = (function(){
@@ -275,7 +290,9 @@ function viewIdentity(next){
       <label>Correo / teléfono (opcional)</label>
       <input id="i-email" value="${esc(p.email||"")}" placeholder="Para coordinar entregas">
       <label class="consent"><input type="checkbox" id="i-consent">
-        <span>Acepto que Fab City almacene estos datos para coordinar la donación médica.</span></label>
+        <span>Acepto que Fab City almacene estos datos para coordinar la donación médica.
+        Fab City es una organización sin ánimo de lucro con sede en Estonia y gestiona
+        los datos según los estándares de la UE (RGPD).</span></label>
       <div class="btn-row"><button class="btn alt block" id="i-go">Continuar →</button></div>
     </div>
   </section>`;
@@ -443,7 +460,7 @@ async function sendBacklog(){
 /* ============================================================
    VIEW: DASHBOARD (public, shareable)
    ============================================================ */
-let _rows=null, _fFilter="all", _fPais="";
+let _rows=null, _fFilter="all", _fPais="", _fModel="", _filtered=[];
 function viewDashboard(){
   app.innerHTML=`
   <section class="block">
@@ -454,9 +471,14 @@ function viewDashboard(){
       ${[["all","Todo"],["today","Hoy"],["week","Semana"],["month","Mes"]].map(([k,l])=>
         `<button class="fbtn ${k==="all"?"on":""}" data-f="${k}">${l}</button>`).join("")}
       <button class="fbtn" id="dash-refresh" style="margin-left:auto">↻ Actualizar</button>
+      <button class="fbtn" id="dash-download">⬇ Reporte CSV</button>
     </div>
-    <div class="selrow"><span class="muted" style="font-size:13px">🌎 País</span>
-      <select id="dash-pais"><option value="">Todos</option></select></div>
+    <div class="selrow" style="flex-wrap:wrap">
+      <span class="muted" style="font-size:13px">🌎 País</span>
+      <select id="dash-pais" style="flex:1;min-width:130px"><option value="">Todos</option></select>
+      <span class="muted" style="font-size:13px">🦴 Modelo</span>
+      <select id="dash-model" style="flex:1;min-width:130px"><option value="">Todos</option></select>
+    </div>
   </section>
   <div id="dash-body"><div class="center"><span class="spin">⏳</span> Cargando…</div></div>`;
   app.querySelectorAll("#dash-filters [data-f]").forEach(b=>b.onclick=()=>{
@@ -464,7 +486,9 @@ function viewDashboard(){
     renderDash();
   });
   document.getElementById("dash-pais").onchange=e=>{_fPais=e.target.value;renderDash();};
+  document.getElementById("dash-model").onchange=e=>{_fModel=e.target.value;renderDash();};
   document.getElementById("dash-refresh").onclick=loadDash;
+  document.getElementById("dash-download").onclick=downloadReport;
   loadDash();
 }
 async function loadDash(){
@@ -474,8 +498,55 @@ async function loadDash(){
   const sel=document.getElementById("dash-pais");
   if(sel){ const ps=[...new Set(_rows.map(r=>r.pais).filter(Boolean))].sort();
     sel.innerHTML='<option value="">Todos</option>'+ps.map(p=>`<option ${p===_fPais?"selected":""}>${esc(p)}</option>`).join(""); }
+  const msel=document.getElementById("dash-model");
+  if(msel){ const ms=[...new Set(_rows.map(r=>r.tipo).filter(Boolean))].sort();
+    msel.innerHTML='<option value="">Todos</option>'+ms.map(m=>`<option ${m===_fModel?"selected":""}>${esc(m)}</option>`).join(""); }
   renderDash();
 }
+/* CSV report of whatever is currently filtered (category + period + location) */
+function csvCell(v){ v=String(v==null?"":v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function downloadReport(){
+  if(!_filtered.length){ toast("No hay datos para exportar."); return; }
+  const hdr=["Fecha","Empresa","Tipo","Fabricadas","Entregadas","Pais"];
+  const lines=[hdr.join(",")].concat(_filtered.map(r=>
+    [r.fecha,r.empresa,r.tipo,r.fab,r.ent,r.pais].map(csvCell).join(",")));
+  const blob=new Blob(["﻿"+lines.join("\n")],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=`makers-venezuela_${_fFilter}_${(_fPais||"todos")}_${(_fModel||"todos")}.csv`.replace(/\s+/g,"-");
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+  toast(`⬇ ${_filtered.length} registros exportados`);
+}
+/* proportional-symbol map of fabricated units per country */
+function buildCountryMap(byCountry){
+  const pts=Object.entries(byCountry).map(([c,v])=>{
+    const co=CENTROIDS[c]; return co?{c,fab:v.fab,ent:v.ent,lon:co[0],lat:co[1]}:null;
+  }).filter(Boolean);
+  if(!pts.length) return "";
+  const xs=pts.map(p=>p.lon), ys=pts.map(p=>-p.lat);
+  let minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+  const padX=Math.max(10,(maxX-minX)*0.3)+8, padY=Math.max(10,(maxY-minY)*0.3)+8;
+  minX-=padX;maxX+=padX;minY-=padY;maxY+=padY;
+  const w=maxX-minX,h=maxY-minY, maxFab=Math.max(...pts.map(p=>p.fab));
+  const rOf=f=>1.4+Math.sqrt(f/maxFab)*Math.min(w,h)*0.14;
+  const fs=Math.max(1.4,Math.min(w,h)*0.028);
+  const circles=pts.sort((a,b)=>b.fab-a.fab).map(p=>{
+    const x=p.lon,y=-p.lat,r=rOf(p.fab);
+    return `<g style="cursor:pointer" onclick="setPaisFromMap('${p.c.replace(/'/g,"")}')">
+      <circle cx="${x}" cy="${y}" r="${r}" fill="var(--orange)" fill-opacity="0.5" stroke="var(--orange)" stroke-width="0.4"/>
+      <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="${Math.max(fs,r*0.55)}" font-weight="900" fill="#fff">${p.fab}</text>
+      <text x="${x}" y="${(y+r+fs*1.25).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="var(--ink)">${esc(p.c)}</text>
+    </g>`;
+  }).join("");
+  return `<section class="block"><h2><span class="tick"></span>Producción por país</h2>
+    <div style="background:var(--paper-warm);border:2px solid var(--line);border-radius:14px;padding:10px">
+      <svg viewBox="${minX.toFixed(1)} ${minY.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}"
+        style="width:100%;height:auto;display:block;max-height:60vh" preserveAspectRatio="xMidYMid meet">${circles}</svg>
+    </div>
+    <p class="muted" style="font-size:11px;margin-top:6px">Tamaño = unidades fabricadas. Toca un país para filtrar. Solo se muestran países con ubicación registrada.</p>
+  </section>`;
+}
+function setPaisFromMap(c){ _fPais=c; const s=document.getElementById("dash-pais"); if(s) s.value=c; renderDash(); }
 function inRange(d){
   if(_fFilter==="all"||!d) return _fFilter==="all";
   const now=new Date(), x=new Date(d);
@@ -486,11 +557,16 @@ function inRange(d){
 }
 function renderDash(){
   const body=document.getElementById("dash-body"); if(!body||!_rows) return;
-  const rows=_rows.filter(r=>_fFilter==="all"?true:inRange((r.fecha||"").slice(0,10))).filter(r=>!_fPais||r.pais===_fPais);
+  const rows=_rows
+    .filter(r=>_fFilter==="all"?true:inRange((r.fecha||"").slice(0,10)))
+    .filter(r=>!_fPais||r.pais===_fPais)
+    .filter(r=>!_fModel||r.tipo===_fModel);
+  _filtered=rows;
   if(!rows.length){ body.innerHTML=`<div class="center">Sin datos para este filtro todavía.</div>`; return; }
-  const byModel={}, orgs=new Set(); let fab=0,ent=0;
+  const byModel={}, byCountry={}, orgs=new Set(); let fab=0,ent=0;
   rows.forEach(r=>{ fab+=r.fab; ent+=r.ent; if(r.empresa)orgs.add(r.empresa);
-    const k=r.tipo||"—"; (byModel[k]=byModel[k]||{fab:0,ent:0}); byModel[k].fab+=r.fab; byModel[k].ent+=r.ent; });
+    const k=r.tipo||"—"; (byModel[k]=byModel[k]||{fab:0,ent:0}); byModel[k].fab+=r.fab; byModel[k].ent+=r.ent;
+    const c=r.pais||""; if(c){ (byCountry[c]=byCountry[c]||{fab:0,ent:0}); byCountry[c].fab+=r.fab; byCountry[c].ent+=r.ent; } });
   const sorted=Object.entries(byModel).sort((a,b)=>b[1].fab-a[1].fab);
   const max=Math.max(1,...sorted.map(([,v])=>v.fab));
   const modelRows=sorted.map(([t,v])=>{
@@ -513,6 +589,7 @@ function renderDash(){
         <div class="kpi"><b>${orgs.size}</b><span>🏭 Talleres</span></div>
       </div>
     </section>
+    ${buildCountryMap(byCountry)}
     <section class="block"><h2><span class="tick"></span>Producción por modelo</h2>${modelRows}</section>
     <section class="block"><h2><span class="tick"></span>Talleres participantes (${orgs.size})</h2>
       <div class="chips">${[...orgs].sort().map(o=>`<div class="chip">${esc(o)}</div>`).join("")}</div></section>`;
