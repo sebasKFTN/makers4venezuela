@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<title>Makers · Venezuela</title>
+<script>
+// GitHub Pages SPA fallback: preserve the deep-link route, then load the app root.
+(function(){
+  var parts = location.pathname.split('/').filter(Boolean);
+  var seg = parts.length ? parts[parts.length-1] : '';
+  var known = ['registro','dashboard','ingesta'];
+  if (known.indexOf(seg) !== -1) {
+    try { sessionStorage.setItem('m4vRoute', seg); } catch(e){}
+    parts.pop();
+  }
+  var base = '/' + (parts.length ? parts.join('/') + '/' : '');
+  location.replace(base + (location.search||'') );
+})();
+</script>
+</head><body></body></html>
