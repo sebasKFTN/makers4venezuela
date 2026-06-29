@@ -45,6 +45,12 @@ function getProfile() {
   catch { return {}; }
 }
 
+/* Change volunteer / log out: forget this device's identity so the next
+ * person gets a fresh maker (new uuid + empty profile). */
+function clearIdentity() {
+  try { localStorage.removeItem(LS_PROFILE); localStorage.removeItem(LS_MAKER); } catch (e) {}
+}
+
 /* ---------- OPTIONAL magic-link verification (Phase 2) ---------- */
 async function sendMagicLink(email) {
   return db.auth.signInWithOtp({
@@ -76,6 +82,15 @@ async function uploadPhoto(file) {
  *          notas, status, photoFile, destinationId} */
 async function registerProduction(entry) {
   const maker_id = getDeviceMakerId();
+  // Self-heal: make sure this device's maker row exists before inserting the
+  // event (covers devices identified before makers writes were allowed).
+  const p = getProfile();
+  if (p && p.name) {
+    await db.from("makers").upsert({
+      id: maker_id, name: p.name, org: p.org || null, country: p.country || null,
+      city: p.city || null, phone: p.phone || null, email: p.email || null
+    }, { onConflict: "id" });
+  }
   let photo_url = null;
   if (entry.photoFile) photo_url = await uploadPhoto(entry.photoFile);
 
@@ -174,7 +189,7 @@ async function getMyInventory() {
 
 /* expose */
 window.M4V = {
-  saveProfile, getProfile, getDeviceMakerId, sendMagicLink,
+  saveProfile, getProfile, clearIdentity, getDeviceMakerId, sendMagicLink,
   listModels, registerProduction, addDestination, uploadPhoto,
   getDashboard, getRows, getMyInventory
 };

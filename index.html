@@ -172,6 +172,7 @@ footer a{color:var(--orange-dark);font-weight:700;text-decoration:none}
       <a data-route="registro">Registrar</a>
       <a data-route="dashboard">Panel</a>
       <a data-route="ingesta">Aportar</a>
+      <a id="nav-logout" data-action="logout" style="display:none;color:var(--red)">⎋ Salir</a>
       <a class="ttw" href="https://ttw.fab.city/venezuela" target="_blank" rel="noopener">TTW ↗</a>
     </nav>
   </div>
@@ -197,8 +198,8 @@ footer a{color:var(--orange-dark);font-weight:700;text-decoration:none}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="supabase-client.js"></script>
-<script src="models-data.js"></script>
+<script src="supabase-client.js?v=2"></script>
+<script src="models-data.js?v=2"></script>
 <script>
 /* ============================================================
    Makers · Venezuela — TTW-skinned app with clean-path routing
@@ -239,12 +240,23 @@ function go(route){
 }
 window.addEventListener("popstate", ()=>render(currentRoute()));
 document.addEventListener("click", e=>{
+  const act = e.target.closest("[data-action]");
+  if(act){ e.preventDefault(); if(act.dataset.action==="logout") logout(); return; }
   const a = e.target.closest("[data-route]");
   if(a){ e.preventDefault(); go(a.dataset.route); }
 });
+function logout(){
+  if(!confirm("¿Cambiar de voluntario? Se borrará la identidad guardada en este dispositivo.")) return;
+  try{ if(window.M4V && M4V.clearIdentity) M4V.clearIdentity();
+       else { localStorage.removeItem("m4v_profile"); localStorage.removeItem("m4v_maker_id"); } }catch(e){}
+  toast("Identidad borrada");
+  go("registro"); // shows the identity form for the next maker
+}
 function setNav(route){
   document.querySelectorAll(".nav a[data-route]").forEach(a=>
     a.classList.toggle("on", a.dataset.route===route));
+  const lo=document.getElementById("nav-logout");
+  if(lo) lo.style.display = hasProfile() ? "" : "none";
 }
 
 /* ---- helpers ---- */
