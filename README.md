@@ -13,6 +13,16 @@ el esfuerzo de toda la red en tiempo real.
 
 ---
 
+> ⚠️ **Fuente de verdad / migración en curso.** Existe una versión anterior
+> (Netlify + Google Sheet `1RT4Gd3d...`) que **todavía recibe registros en paralelo**.
+> Mientras siga activa, los datos divergen: lo que se anote en la app vieja NO
+> aparece aquí salvo que se re-importe con `migrate/migrate-data.sql` (que borra
+> y recarga). Decisión pendiente: **retirar la app/sheet vieja** y dejar Supabase
+> como única fuente, o seguir re-importando manualmente. Hasta entonces, este
+> repositorio es la fuente de verdad **solo** tras cada re-importación.
+
+---
+
 ## 1. Qué es esto
 
 Una aplicación **estática** (HTML/CSS/JS, sin framework ni paso de build) que
@@ -48,8 +58,8 @@ políticas de la base de datos (RLS), no el secreto de la clave.
 
 - **Presentación** — `index.html`. Un solo archivo con el tema TTW (crema,
   naranja, Helvetica), un enrutador propio basado en History API, y cuatro
-  vistas (inicio, registro, panel, aportar). Sin dependencias salvo el SDK de
-  Supabase cargado por CDN.
+  vistas (inicio, registro, panel, aportar). Dependencias por CDN: el SDK de
+  Supabase, **Leaflet + CARTO** para el mapa (sin token) y **jsPDF** para los reportes.
 - **Datos del catálogo** — `models-data.js` expone `window.CATALOG`
   (`IDS, NAMES, SUBS, ALTAS, IMGS`). Las miniaturas van en base64 para que el
   registro funcione sin pedir imágenes externas.
@@ -75,7 +85,7 @@ sección correcta. El enrutador es agnóstico al prefijo, así que funciona igua
 
 | Archivo | Rol |
 |---|---|
-| `index.html` | App completa: tema TTW, enrutador, registro, panel (con mapa, filtros y exportación), aportar |
+| `index.html` | App completa: tema TTW, enrutador, registro, panel (mapa Leaflet, filtros y reporte PDF), aportar |
 | `404.html` | Copia de `index.html` — hace funcionar las rutas profundas en GitHub Pages |
 | `models-data.js` | Catálogo de 17 modelos + miniaturas (base64) |
 | `supabase-client.js` | Capa de datos `window.M4V` (clave anon incluida) |
@@ -90,7 +100,7 @@ sección correcta. El enrutador es agnóstico al prefijo, así que funciona igua
 |---|---|
 | `/` | Inicio — los tres accesos |
 | `/registro` | Registro móvil: identifícate, elige modelo, anota fabricadas/entregadas + foto |
-| `/dashboard` | Panel público — KPIs, **mapa por país**, producción por modelo, talleres; filtros de periodo / país / modelo y **exportación CSV** |
+| `/dashboard` | Panel público — KPIs, **mapa coroplético por país** (Leaflet + CARTO, sin token; intensidad naranja = unidades), producción por modelo con íconos, talleres; filtros de periodo / país / modelo y **reporte PDF** |
 | `/ingesta` | Aportar historial: carga varios lotes pasados de una vez |
 
 ---
