@@ -4,251 +4,172 @@ Registro abierto de producción 3D para la donación médica en Venezuela.
 Los makers anotan cuántas férulas fabrican y entregan; el panel público suma
 el esfuerzo de toda la red en tiempo real.
 
-**Creado por [KAFETIN](https://www.kafetin.co) · con el apoyo de Fab City**
+**Creado por [KAFETIN](https://www.kafetin.co) · con la tecnología de [Fab City](https://fab.city/)**
 · [Things That Work](https://ttw.fab.city/venezuela)
 
+**Sitio en vivo (fuente de verdad): https://makers4venezuela.github.io/**
+
 > **Datos:** Fab City es una organización sin ánimo de lucro con sede en Estonia.
-> La gestión de datos de este registro sigue los estándares de la Unión Europea
-> (RGPD / GDPR).
+> La gestión de datos sigue los estándares de la Unión Europea (RGPD / GDPR).
 
 ---
 
-> ⚠️ **Fuente de verdad / migración en curso.** Existe una versión anterior
-> (Netlify + Google Sheet `1RT4Gd3d...`) que **todavía recibe registros en paralelo**.
-> Mientras siga activa, los datos divergen: lo que se anote en la app vieja NO
-> aparece aquí salvo que se re-importe con `migrate/migrate-data.sql` (que borra
-> y recarga). Decisión pendiente: **retirar la app/sheet vieja** y dejar Supabase
-> como única fuente, o seguir re-importando manualmente. Hasta entonces, este
-> repositorio es la fuente de verdad **solo** tras cada re-importación.
+> ⚠️ **Migración en curso.** Existió una versión anterior en Netlify
+> (`makers4venezuela.netlify.app`) que escribía a un Google Sheet. Ya se redirige
+> a este sitio (`m4v-redirect/`). Mientras alguien siga registrando en la app
+> vieja, usa `migrate/migrate-data.sql` (borra y recarga) para re-importar; una
+> tarea diaria (`m4v-sync-old-sheet`) regenera ese SQL automáticamente. Cuando la
+> app vieja quede sin uso, **Supabase es la única fuente de verdad.**
 
 ---
 
 ## 1. Qué es esto
 
-Una aplicación **estática** (HTML/CSS/JS, sin framework ni paso de build) que
-habla directamente con una base de datos **Supabase** (PostgreSQL). No hay
-servidor propio que mantener: el navegador del maker lee y escribe contra
-Supabase usando una clave pública (`anon`), y la seguridad la imponen las
-políticas de la base de datos (RLS), no el secreto de la clave.
+App **estática** (HTML/CSS/JS, sin build) servida por GitHub Pages, conectada en
+vivo desde el navegador a una base de datos **Supabase** (PostgreSQL). Sin
+servidor propio: el navegador lee/escribe contra Supabase con una clave pública
+(`anon`); la seguridad la imponen las políticas de la base (RLS) y vistas
+agregadas, no el secreto de la clave.
+
+Dependencias por CDN: SDK de Supabase, **Leaflet + CARTO** (mapa, sin token),
+**jsPDF** (reportes).
 
 ---
 
-## 2. Arquitectura
+## 2. Funciones
+
+- **Registro móvil** — identifícate una vez (país, nombre, taller), elige modelo
+  (con su ícono), anota fabricadas/entregadas + foto. Sin cuenta, sin fricción.
+- **Aportar (historial)** — carga varios lotes pasados de una vez.
+- **Panel público** — KPIs, **mapa coroplético por país** (Leaflet/CARTO,
+  intensidad naranja = unidades; toca un país para filtrar), producción por
+  modelo con íconos, y **talleres participantes**: toca un taller para ver sus
+  totales (fabricadas / entregadas / registros) en un popup.
+- **Mi panel** — el track record del maker, agrupado por su taller (incluye
+  historial importado y otros dispositivos del mismo taller). **Marca posibles
+  duplicados** (mismo modelo, fecha y cantidades).
+- **Filtros** de periodo / país / modelo y **reporte PDF** descargable en cada vista.
+- **Cambiar voluntario / Salir** — borra la identidad del dispositivo para que el
+  siguiente maker (en un equipo compartido) registre a su nombre.
+
+---
+
+## 3. Arquitectura
 
 ```
-   Navegador del maker (móvil/escritorio)
-   ┌─────────────────────────────────────────┐
-   │  index.html  (UI + enrutador de rutas)   │
-   │  models-data.js  (catálogo + miniaturas) │
-   │  supabase-client.js  → window.M4V        │
-   └───────────────┬─────────────────────────┘
-                   │  HTTPS (REST + Storage), clave anon pública
+   Navegador del maker
+   ┌───────────────────────────────────────────┐
+   │ index.html (UI + enrutador de rutas)        │
+   │ models-data.js (catálogo + miniaturas)      │
+   │ supabase-client.js → window.M4V             │
+   │ Leaflet + CARTO (mapa) · jsPDF (reportes)   │
+   └───────────────┬─────────────────────────────┘
+                   │ HTTPS REST + Storage (clave anon pública)
                    ▼
-   ┌─────────────────────────────────────────┐
-   │  Supabase (PostgreSQL)  — operado por FC │
-   │  · tablas: makers, models,               │
-   │    production_events, destinations       │
-   │  · vistas públicas: dashboard_* , inventory
-   │  · RLS: anon inserta; PII no es legible   │
-   │  · Storage: bucket "fotos"               │
-   └─────────────────────────────────────────┘
+   ┌───────────────────────────────────────────┐
+   │ Supabase (PostgreSQL) — operado por Fab City│
+   │ tablas: makers, models, production_events,  │
+   │   destinations                              │
+   │ vistas públicas: dashboard_events,          │
+   │   dashboard_by_country/by_model, inventory, │
+   │   makers_lookup, maker_events               │
+   │ Storage: bucket "fotos"                     │
+   └───────────────────────────────────────────┘
 ```
 
-**Capas:**
+**Identidad sin fricción:** un UUID por dispositivo en `localStorage`; sin cuenta.
+Al identificarte, la app **adopta** un maker existente con el mismo nombre+taller
+(vista `makers_lookup`) para que tus registros nuevos se sumen a los previos en
+vez de duplicar. La creación del maker usa un *insert* simple tolerante a
+duplicados (los upserts requieren permiso UPDATE que no se otorga).
 
-- **Presentación** — `index.html`. Un solo archivo con el tema TTW (crema,
-  naranja, Helvetica), un enrutador propio basado en History API, y cuatro
-  vistas (inicio, registro, panel, aportar). Dependencias por CDN: el SDK de
-  Supabase, **Leaflet + CARTO** para el mapa (sin token) y **jsPDF** para los reportes.
-- **Datos del catálogo** — `models-data.js` expone `window.CATALOG`
-  (`IDS, NAMES, SUBS, ALTAS, IMGS`). Las miniaturas van en base64 para que el
-  registro funcione sin pedir imágenes externas.
-- **Acceso a datos** — `supabase-client.js` expone `window.M4V`, la única puerta
-  entre la UI y la base. Toda lectura/escritura pasa por aquí (ver §6, API).
-- **Backend** — Supabase. Postgres es la fuente de verdad; el panel lee vistas
-  agregadas; las fotos viven en Storage.
-
-**Identidad sin fricción:** un maker se identifica una vez. Se genera un UUID en
-el dispositivo (`localStorage`) que actúa como su id; no hace falta cuenta ni
-contraseña. La verificación por *magic-link* está prevista en el esquema pero
-desactivada hasta la Fase 2.
-
-**Enrutado de rutas limpias:** el enrutador lee `location.pathname`. Como GitHub
-Pages no tiene router de servidor, `404.html` es una copia de `index.html`: ante
-una ruta profunda (`/dashboard`) Pages sirve el 404, la app arranca y muestra la
-sección correcta. El enrutador es agnóstico al prefijo, así que funciona igual en
-`usuario.github.io/makers4venezuela/` que bajo un dominio propio.
+**Rutas limpias:** el enrutador usa History API; `404.html` es un redirector
+estático que preserva la ruta (truco SPA para GitHub Pages) — no necesita
+mantenimiento.
 
 ---
 
-## 3. Archivos
+## 4. Archivos del repo
 
 | Archivo | Rol |
 |---|---|
-| `index.html` | App completa: tema TTW, enrutador, registro, panel (mapa Leaflet, filtros y reporte PDF), aportar |
-| `404.html` | Copia de `index.html` — hace funcionar las rutas profundas en GitHub Pages |
+| `index.html` | App completa (tema TTW, enrutador, todas las vistas) |
+| `404.html` | Redirector SPA para rutas profundas en GitHub Pages |
 | `models-data.js` | Catálogo de 17 modelos + miniaturas (base64) |
-| `supabase-client.js` | Capa de datos `window.M4V` (clave anon incluida) |
-| `schema.sql` | Esquema completo de Supabase (tablas, vistas, RLS, datos de los 17 modelos) |
-| `migrate/` | Importación única del histórico del Google Sheet original |
+| `supabase-client.js` | Capa de datos `window.M4V` (incluye la clave anon, pública) |
 
----
+Carpetas de apoyo (NO se despliegan; se ejecutan/usan a mano):
+`migrate/` (SQL de importación y arreglos), `m4v-redirect/` (redirección de la app vieja).
 
-## 4. Rutas (cada una con su URL, compartible)
+## 5. Rutas
 
 | URL | Vista |
 |---|---|
-| `/` | Inicio — los tres accesos |
-| `/registro` | Registro móvil: identifícate, elige modelo, anota fabricadas/entregadas + foto |
-| `/dashboard` | Panel público — KPIs, **mapa coroplético por país** (Leaflet + CARTO, sin token; intensidad naranja = unidades), producción por modelo con íconos, talleres; filtros de periodo / país / modelo y **reporte PDF** |
-| `/ingesta` | Aportar historial: carga varios lotes pasados de una vez |
+| `/` | Inicio |
+| `/registro` | Registro móvil |
+| `/dashboard` | Panel público (mapa, modelos, talleres con popup) |
+| `/ingesta` | Aportar historial |
+| `/mis-registros` | Mi panel (track record + duplicados) |
 
 ---
 
-## 5. Puesta en marcha y despliegue
+## 6. Puesta en marcha (Supabase, cuenta de Fab City)
 
-**Backend (Supabase, cuenta de Fab City):**
+1. Crear proyecto. Copiar *Project URL* y *anon public key* → pegarlas al inicio de `supabase-client.js`.
+2. SQL Editor → ejecutar `migrate/schema.sql` (esquema base).
+3. Ejecutar `migrate/fix-rls.sql` (políticas/RLS para escritura anónima).
+4. Ejecutar `migrate/user-panel.sql` (vistas `makers_lookup` + `maker_events`
+   que activan **Mi panel** y el reconocimiento de makers que regresan).
+5. (Opcional) `migrate/migrate-data.sql` para importar el histórico del Sheet viejo.
+6. Storage → bucket público **`fotos`**.
 
-1. Crear proyecto Supabase. Copiar *Project URL* y *anon public key*.
-2. SQL Editor → ejecutar `schema.sql`.
-3. Storage → crear bucket público **`fotos`**.
-4. Pegar URL y anon key al inicio de `supabase-client.js` (la anon key es
-   pública; va en el repo sin problema).
-
-**Frontend (GitHub Pages):**
-
-1. Subir los archivos al repositorio.
-2. Settings → Pages → desplegar desde `main`, carpeta raíz.
-3. Confirmar que `404.html` está en la raíz (sirve las rutas profundas).
+Despliegue: subir `index.html`, `404.html`, `models-data.js`, `supabase-client.js`
+a la raíz del repo (GitHub Pages, rama `main`).
 
 ---
 
-## 6. API — cómo leer y escribir datos
+## 7. API
 
-Hay dos formas de hablar con el backend: la **capa `window.M4V`** (para la web)
-y la **API REST de Supabase** directa (para integraciones, p. ej. un agente de
-impresora). Ambas usan la misma clave anon pública y respetan las mismas reglas
-RLS.
+Dos formas: la capa **`window.M4V`** (web) y la **API REST de Supabase**
+(integraciones, p. ej. agente de impresora — campo `source:"api"`).
 
-### 6.1 Capa `window.M4V` (JavaScript en el navegador)
-
-| Función | Qué hace |
+| `window.M4V` | Qué hace |
 |---|---|
-| `M4V.saveProfile({name, org, country, city, phone, email})` | Crea/actualiza el perfil del maker en este dispositivo |
-| `M4V.getProfile()` | Devuelve el perfil guardado localmente |
-| `M4V.registerProduction(entry)` | Inserta un lote de producción (ver forma abajo) |
-| `M4V.getRows()` | Lee el feed agregado para el panel (`{fecha, empresa, tipo, fab, ent, pais}`) |
-| `M4V.getDashboard({range, country})` | Totales ya agregados (alternativa a `getRows`) |
-| `M4V.listModels()` | Catálogo desde la base (`id, name, variant, …`) |
-| `M4V.uploadPhoto(file)` | Sube una foto al bucket `fotos`, devuelve URL pública |
-| `M4V.addDestination({name, city, org})` | Registra una clínica/destino de entrega |
-| `M4V.getMyInventory()` | Inventario del maker (en mano = fabricadas − entregadas) |
+| `saveProfile({name,org,country,city,phone,email})` | Crea/identifica al maker (adopta uno existente por nombre+taller) |
+| `registerProduction(entry)` | Inserta un lote (crea el maker si falta) |
+| `getRows()` | Feed agregado del panel |
+| `getMyEvents()` | Registros del maker (por dispositivo + mismo taller) — alimenta Mi panel |
+| `listModels()` · `uploadPhoto(file)` · `addDestination()` · `getDashboard()` | Catálogo, foto, destino, totales |
 
-Forma de `entry` para `registerProduction`:
-
-```js
-await M4V.registerProduction({
-  modelId: 7,                       // id del catálogo, o null si es modelo libre
-  modelLabel: "FTM Mano - 4to y 5to Metacarpo", // etiqueta legible
-  fabricadas: 12,
-  entregadas: 8,
-  fecha: "2026-06-29",              // YYYY-MM-DD (por defecto hoy)
-  notas: "Para clínica X",          // opcional
-  status: "delivered",              // "printed" | "delivered" | "verified"
-  source: "manual",                 // "manual" | "api"
-  photoFile: fileInput.files[0]     // opcional
-});
-```
-
-### 6.2 API REST de Supabase (integraciones externas)
-
-Base URL: `https://<PROYECTO>.supabase.co/rest/v1`
-Cabeceras en cada llamada:
-
-```
-apikey: <ANON_KEY>
-Authorization: Bearer <ANON_KEY>
-Content-Type: application/json
-```
-
-**Insertar un evento de producción** (esto es lo que haría un agente OctoPrint /
-Moonraker al terminar una impresión — fíjese en `source: "api"`):
-
-```bash
-curl -X POST 'https://<PROYECTO>.supabase.co/rest/v1/production_events' \
-  -H "apikey: <ANON_KEY>" -H "Authorization: Bearer <ANON_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "maker_id": "<UUID-DEL-MAKER>",
-    "model_id": 7,
-    "model_label": "FTM Mano - 4to y 5to Metacarpo",
-    "qty_fabricated": 1,
-    "qty_delivered": 0,
-    "status": "printed",
-    "event_date": "2026-06-29",
-    "source": "api",
-    "notes": "auto: impresión finalizada"
-  }'
-```
-
-**Leer el panel público** (vista segura, sin datos personales):
-
-```bash
-# todos los eventos (para agregación en cliente)
-curl 'https://<PROYECTO>.supabase.co/rest/v1/dashboard_events?select=*' \
-  -H "apikey: <ANON_KEY>" -H "Authorization: Bearer <ANON_KEY>"
-
-# totales por país
-curl 'https://<PROYECTO>.supabase.co/rest/v1/dashboard_by_country?select=*' \
-  -H "apikey: <ANON_KEY>" -H "Authorization: Bearer <ANON_KEY>"
-
-# totales por modelo
-curl 'https://<PROYECTO>.supabase.co/rest/v1/dashboard_by_model?select=*' \
-  -H "apikey: <ANON_KEY>" -H "Authorization: Bearer <ANON_KEY>"
-```
-
-**Lo que la clave anon NO puede hacer:** leer la tabla `makers` (teléfono/correo
-quedan privados), ni actualizar/borrar eventos de otros. Solo puede *insertar*
-makers y eventos, y *leer* las vistas `dashboard_*`. Para operaciones
-administrativas (verificación, exportaciones con PII) se usa la `service_role`
-key, que custodia Fab City y nunca se publica.
+REST: `https://<PROYECTO>.supabase.co/rest/v1/<tabla>` con cabeceras
+`apikey` + `Authorization: Bearer <anon>`. La clave anon puede **insertar**
+makers/eventos y **leer** las vistas `dashboard_*` / `maker_events` /
+`makers_lookup`; **no** puede leer teléfono/correo de la tabla `makers`.
 
 ---
 
-## 7. Modelo de datos
+## 8. Modelo de datos
 
-- **makers** — quién imprime (nombre, taller, país, ciudad, contacto). PII protegida por RLS.
-- **models** — catálogo (17 modelos sembrados; `medically_validated` por defecto `false`).
-- **production_events** — el corazón: maker, modelo, fabricadas, entregadas, fecha, estado, foto, `source`.
-- **destinations** — clínicas/hospitales de entrega.
-- **inventory** *(vista)* — en mano = fabricadas − entregadas, por maker y modelo.
-- **dashboard_events / dashboard_by_country / dashboard_by_model / dashboard_orgs** *(vistas públicas)* — agregados sin datos personales; son la superficie de exportación.
-
-Mapa modelo→id: los ids sembrados (1–17) coinciden con el orden del catálogo en
-`models-data.js`. **No reordenar las filas sembradas** o se rompe la correspondencia.
+- **makers** — quién imprime (nombre, taller, país, ciudad, contacto). PII protegida.
+- **models** — catálogo (17 sembrados; orden = ids 1–17, no reordenar).
+- **production_events** — modelo, fabricadas, entregadas, fecha, estado, foto, `source`.
+- **destinations** — clínicas/hospitales.
+- Vistas: `inventory`, `dashboard_*` (agregados públicos), `makers_lookup` /
+  `maker_events` (Mi panel; sin datos personales).
 
 ---
 
-## 8. Hoja de ruta
+## 9. Hoja de ruta
 
-- **Fase 2 — verificación + inventario.** Rol verificador que confirma entregas;
-  vista de inventario por maker. Hasta entonces, los conteos son auto-reportados.
-- **Fase 3 — ingesta por API de impresora.** Los campos `source` (`manual`/`api`)
-  y `model_label` ya existen; un agente OctoPrint/Moonraker puede POSTear eventos
-  (§6.2) sin cambiar el esquema. Empezar por OctoPrint/Moonraker; Bambu como best-effort.
-- **Fab City Index.** Las vistas por país/modelo son la superficie de exportación;
-  conectar al Index como indicador-caso (respuesta de manufactura distribuida en
-  crisis), no como línea base, hasta tener normalización y un trimestre de datos.
+- **Verificación (Fase 2):** rol verificador que confirma entregas; hasta entonces los conteos son auto-reportados.
+- **API de impresora (Fase 3):** un agente OctoPrint/Moonraker puede POSTear eventos (`source:"api"`) sin cambiar el esquema.
+- **Fab City Index:** las vistas por país/modelo son la superficie de exportación, como indicador-caso de manufactura distribuida en crisis.
+- **Limpieza:** consolidar talleres con grafías distintas ("WORLD 3D" vs "WORLD3D").
 
----
+## 10. Gobernanza
 
-## 9. Gobernanza y datos
-
-Creado por **KAFETIN** ([www.kafetin.co](https://www.kafetin.co)), que mantiene
-la aplicación. **Fab City** aporta la tecnología y es responsable de los datos
-(controlador): organización sin ánimo de lucro con sede en Estonia, con gestión
-de datos conforme a los estándares de la Unión Europea (RGPD / GDPR).
-
-Los cambios de esquema son **aditivos** (nuevas columnas/vistas) para no romper
-versiones anteriores del front-end. Por estar operado por Fab City, este proyecto
-sirve de plantilla reutilizable para la próxima respuesta de crisis.
+Creado por **KAFETIN**, que mantiene la app. **Fab City** aporta la tecnología y
+es responsable de los datos (controlador): sin ánimo de lucro, con sede en
+Estonia, gestión conforme al RGPD. Cambios de esquema = aditivos. Por estar
+operado por Fab City, este proyecto es la plantilla reutilizable para la próxima
+respuesta de crisis.
