@@ -185,7 +185,7 @@ footer a{color:var(--orange-dark);font-weight:700;text-decoration:none}
 
 <footer><div class="wrap">
   <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;width:100%">
-    <span>Creado por <a href="https://www.kafetin.co" target="_blank" rel="noopener"><strong>KAFETIN</strong></a> · con la tecnología de <strong>Fab City</strong></span>
+    <span>Creado por <a href="https://www.kafetin.co" target="_blank" rel="noopener"><strong>KAFETIN</strong></a> · con la tecnología de <a href="https://fab.city/" target="_blank" rel="noopener"><strong>Fab City</strong></a></span>
     <span style="display:flex;align-items:center;gap:14px">
       <a href="https://ttw.fab.city/venezuela" target="_blank" rel="noopener">ttw.fab.city/venezuela</a>
       <a href="https://github.com/makers4venezuela/makers4venezuela.github.io" target="_blank" rel="noopener"
@@ -340,11 +340,11 @@ function viewIdentity(next){
         <span>Acepto que Fab City almacene estos datos para coordinar la donación médica.
         Fab City es una organización sin ánimo de lucro con sede en Estonia y gestiona
         los datos según los estándares de la UE (RGPD).</span></label>
-      <div class="btn-row"><button class="btn alt block" id="i-go" disabled>Continuar →</button></div>
+      <div class="btn-row"><button class="btn block" id="i-go" disabled>Continuar →</button></div>
     </div>
   </section>`;
   const consent=document.getElementById("i-consent"), go=document.getElementById("i-go");
-  consent.onchange = ()=>{ go.disabled = !consent.checked; };
+  consent.onchange = ()=>{ go.disabled = !consent.checked; go.classList.toggle("alt", consent.checked); };
   go.onclick = async ()=>{
     const pais=val("i-pais"), name=val("i-name").trim(), org=val("i-org").trim();
     if(!pais||!name||!org){ toast("Completa país, nombre y empresa."); return; }
