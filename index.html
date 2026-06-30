@@ -86,6 +86,13 @@ textarea{resize:vertical;min-height:56px}
 .consent{cursor:pointer}
 .consent input{width:22px;height:22px;margin-top:1px;flex-shrink:0;accent-color:var(--orange);cursor:pointer}
 .btn:disabled{opacity:.4;cursor:not-allowed}
+.chip-btn{font-family:inherit;cursor:pointer}
+.chip-btn:hover{border-color:var(--orange);color:var(--orange-dark)}
+.ovl{display:none;position:fixed;inset:0;z-index:300;background:rgba(20,20,15,.5);
+  align-items:center;justify-content:center;padding:20px}
+.ovl.show{display:flex}
+.ovl-card{background:var(--paper);border:2px solid var(--line);border-radius:16px;
+  padding:20px;max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25)}
 
 /* card grids */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:14px}
@@ -718,7 +725,11 @@ function renderDash(){
   _filtered=rows;
   if(!rows.length){ body.innerHTML=`<div class="center">Sin datos para este filtro todavía.</div>`; return; }
   const byModel={}, byCountry={}, orgs=new Set(); let fab=0,ent=0;
-  rows.forEach(r=>{ fab+=r.fab; ent+=r.ent; if(r.empresa)orgs.add(r.empresa);
+  _orgStats={};
+  rows.forEach(r=>{ fab+=r.fab; ent+=r.ent;
+    if(r.empresa){ orgs.add(r.empresa);
+      const o=(_orgStats[r.empresa]=_orgStats[r.empresa]||{fab:0,ent:0,recs:0});
+      o.fab+=r.fab; o.ent+=r.ent; o.recs++; }
     const k=r.tipo||"—"; (byModel[k]=byModel[k]||{fab:0,ent:0}); byModel[k].fab+=r.fab; byModel[k].ent+=r.ent;
     const c=r.pais||""; if(c){ (byCountry[c]=byCountry[c]||{fab:0,ent:0}); byCountry[c].fab+=r.fab; byCountry[c].ent+=r.ent; } });
   const sorted=Object.entries(byModel).sort((a,b)=>b[1].fab-a[1].fab);
@@ -754,7 +765,28 @@ function renderDash(){
     <section class="block"><h2><span class="tick"></span>Producción por modelo</h2>
       <div class="dcards">${modelRows}</div></section>
     <section class="block"><h2><span class="tick"></span>Talleres participantes (${orgs.size})</h2>
-      <div class="chips">${[...orgs].sort().map(o=>`<div class="chip">${esc(o)}</div>`).join("")}</div></section>`;
+      <p class="muted" style="font-size:11px;margin-bottom:8px">Toca un taller para ver sus totales.</p>
+      <div class="chips">${[...orgs].sort().map(o=>`<button class="chip chip-btn" data-org="${esc(o)}">${esc(o)}</button>`).join("")}</div></section>`;
+  body.querySelectorAll(".chip-btn[data-org]").forEach(c=> c.onclick=()=>openOrgStats(c.dataset.org));
+}
+let _orgStats={};
+function openOrgStats(org){
+  const s=_orgStats[org]||{fab:0,ent:0,recs:0};
+  let m=document.getElementById("orgpop");
+  if(!m){ m=document.createElement("div"); m.id="orgpop"; m.className="ovl";
+    m.addEventListener("click",e=>{ if(e.target===m) m.classList.remove("show"); });
+    document.body.appendChild(m); }
+  m.innerHTML=`<div class="ovl-card">
+      <div style="font-size:17px;font-weight:900;line-height:1.2">${esc(org)}</div>
+      <div class="muted" style="font-size:11px;margin:2px 0 12px">Taller participante</div>
+      <div class="kpis" style="margin-top:0">
+        <div class="kpi o"><b>${s.fab.toLocaleString("es")}</b><span>🔧 Fabricadas</span></div>
+        <div class="kpi g"><b>${s.ent.toLocaleString("es")}</b><span>📦 Entregadas</span></div>
+        <div class="kpi"><b>${s.recs}</b><span>📋 Registros</span></div>
+      </div>
+      <button class="btn block" style="margin-top:14px" onclick="document.getElementById('orgpop').classList.remove('show')">Cerrar</button>
+    </div>`;
+  m.classList.add("show");
 }
 
 /* ============================================================
